@@ -1,0 +1,223 @@
+/*
+generate_letters.pc example of execution of a package procedure in oracle Pro*C
+UNIX demo
+Author (C) 2008 Daniel G. Campos
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+*/
+
+/** \file generate_letters.pc main program */
+
+/*
+    parameters    
+    -n   no commit mode, just testing
+    
+    the connection string determines the user we are making the connection with, 
+    and so this user MUST have execution permissions granted from a DBA in order 
+    to execute the package, Typically this Pro*C code is run by a shell script 
+    process that is automatically called with a crontab, and the connection strings
+    resides in another script with another permissions.
+    
+    this oracle package creates letters for customers, leave them into a temporary folder   
+    (CARTAS_DIR) and then moves them to the final destination (UTL_DIR) for further process
+    So this is a typical example of execution of an oracle package procedure with text file
+    creation from it, also calling a host operating system command execution as well 
+
+
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+#include <sqlca.h>
+
+/* Define constants for VARCHAR lengths. */
+#define     PATH_LEN        80
+#define     FILE_LEN        80
+#define	    FILE_NAME       "LETTER_FOR_"
+#define     CARTAS_DIR      "/datafiles/letters_new/new"
+#define     UTL_DIR         "/datafiles/utl_dir"
+
+/* Structs */
+EXEC SQL BEGIN DECLARE SECTION;
+
+char    PathIn[PATH_LEN];
+char    FileIn[FILE_LEN];
+char	RET[100];
+char	MSG[500];
+long 	COMMIT_MODE = 1;
+long 	CANTIDAD;
+
+EXEC SQL END DECLARE SECTION;
+
+/* Variables Globales */
+char    Cmd[2500];
+
+/* Declare error handling function. */
+void sql_error(msg)
+     char *msg;
+{
+	char       err_msg[128];
+	size_t     buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+	
+	printf("\n%s\n", msg);
+	buf_len = sizeof (err_msg);
+	sqlglm(err_msg, &buf_len, &msg_len);
+	printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(EXIT_FAILURE);
+}
+
+/* Declare error handling function. */
+void fatal_error(msg)
+     char *msg;
+{
+	struct     tm *datetime;
+	char       start_date[24];
+	time_t     idate;
+	
+	printf("\n# FATAL ERROR #\n");
+	printf("%s\n",msg);
+	
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (start_date,35,"%d-%m-%Y %H:%M:%S",datetime);
+	printf ("finish time : %s\n\n",start_date);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(EXIT_FAILURE);
+}
+
+/* initial setup */
+void Setup()
+{
+	long i;
+	struct tm *datetime;
+	char   start_date[24];
+	char   log_date[24];
+	time_t idate;
+	char   linea[2500];
+	
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (start_date,35,"%d-%m-%Y %H:%M:%S",datetime);
+	strftime (log_date,35,"%Y%m%d%H%M%S",datetime);
+	
+	printf("\n[%s] initial setup\n",start_date);
+	
+	strcpy(PathIn,UTL_DIR);
+	sprintf(FileIn,"%s%s.letter\0",FILE_NAME,log_date);
+	
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (start_date,35,"%d-%m-%Y %H:%M:%S",datetime);
+	
+	printf("[%s] setup finished \n\n",start_date);
+	return;
+}
+
+void main(argc,argv)
+     int argc;
+     char *argv[];
+{
+	long   ret;
+	char   linea[2500];
+	char   aux[2500];
+	char   Path[2500];
+	struct tm *datetime;
+	char   start_date[24];
+	char   log_date[24];
+	time_t idate;
+	int    i;
+	char   sConn[80];
+	char   sOSid[40];
+		
+	/* check entry parameters */ 
+	strcpy(aux,argv[1]);
+	if(strcmp(aux,"-n")==0)
+		COMMIT_MODE = 0;
+	else
+		COMMIT_MODE = 1;
+	
+	/* create a new connection string */
+	strcpy(sOSid, getenv("ORACLE_SID"));
+	strcat(sConn,"/@");
+	strcat(sConn,sOSid);    
+
+	/* Register sql_error() as the error handler. */
+	EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--\n");
+	EXEC SQL CONNECT :sConn;
+
+	printf("\n[%s] Connected to ORACLE as user: %s\n",start_date,sConn);
+	
+	sprintf(Path,"%s%s\0",aux,CARTAS_DIR);
+	
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (start_date,35,"%d-%m-%Y %H:%M:%S",datetime);
+	strftime (log_date,35,"%Y%m%d%H%M%S",datetime);
+	
+	printf ("--GENERATE LETTERS--\n\n");
+	if(COMMIT_MODE)
+		printf("running in COMMIT mode ON.\n");
+	else
+		printf("running in COMMIT mode OFF.\n");
+	
+	printf ("start time: %s\n\n",start_date);
+	
+	/* initial setup  */
+	Setup();
+	
+	printf("LETTERS.GENERATE_LETTERS_FOR_(%s,cantidad);\n",FileIn, CANTIDAD);
+	
+	EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--\n");
+	
+	EXEC SQL EXECUTE
+	
+	BEGIN
+	   OUT_PROCESSES.GENERATE_LETTERS.GENERATE_LETTERS_FOR(:FileIn,:CANTIDAD);
+	END;
+	
+	END-EXEC;
+	
+	/* move the generated files  */
+	if(CANTIDAD > 0)
+	{
+	   sprintf(Cmd,"mv -f %s/%s %s\0",PathIn,FileIn,Path);
+	   ret = system(Cmd);
+	
+    	if(ret != 0)
+    	{
+	        sprintf(linea,"error while executing command mv : %s\n",Cmd);
+	        fatal_error(linea);
+    	}
+	}
+	printf("\nwe generate %d letters.\n\n",CANTIDAD);
+	
+	/* Disconnect from ORACLE. */
+	if(COMMIT_MODE)
+		EXEC SQL COMMIT RELEASE;
+	else
+		EXEC SQL ROLLBACK RELEASE;
+	
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (start_date,35,"%d-%m-%Y %H:%M:%S",datetime);
+	printf ("\nfinish time : %s\n\n",start_date);
+	printf ("SUCCESS\n");
+	
+	exit(EXIT_SUCCESS);
+}
