@@ -1,0 +1,210 @@
+/*
+exec_proc_oracle.pc example of execution of a package procedure in oracle Pro*C
+UNIX demo
+Author (C) 2008 Daniel G. Campos
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+*/
+
+/** \file exec_proc_oracle.pc main program */
+
+/*
+    parameters 
+    P1 = invoice from
+    P2 = invoice to
+    
+    -d   debug mode on
+    -n   no commit mode, just testing
+    
+    the connection string determines the user we are making the connection with, 
+    and so this user MUST have execution permissions granted from a DBA in order 
+    to execute the package, Typically this Pro*C code is run by a shell script 
+    process that is automatically called with a crontab, and the connection strings
+    resides in another script with another permissions  
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+#include <sqlca.h>
+
+/* Structs */
+EXEC SQL BEGIN DECLARE SECTION;
+
+char	RET[100];
+char	MSG[500];
+long	COMMIT_MODE  = 1;
+long	invoice_from = -1;
+long	invoice_to   = -1;
+
+EXEC SQL END DECLARE SECTION;
+
+/* Declare error handling function. */
+void sql_error(msg)
+     char *msg;
+{
+    char err_msg[128];
+    size_t buf_len, msg_len;
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    fprintf(stderr,"\n%s\n", msg);
+    buf_len = sizeof (err_msg);
+    sqlglm(err_msg, &buf_len, &msg_len);
+    fprintf(stderr,"%.*s\n", msg_len, err_msg);
+
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+/* error routine for fatal errors  */
+void fatal_error(msg)
+     char *msg;
+{
+    struct tm *datetime;
+    char   start_date[24];
+    time_t idate;
+
+    printf("\n# FATAL ERROR #\n");
+    printf("%s\n",msg);
+
+    time(&idate);
+    datetime = localtime(&idate);
+    strftime (start_date,35,"%d-%m-%Y %H:%M:%S",datetime);
+    printf ("finish time: %s\n\n",start_date);
+
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+void main(argc,argv)
+     int argc;
+     char *argv[];
+{
+	char       linea[2500];
+	int        i;
+	char       sConn[80];
+	char       sOSid[40];
+	int        DEBUG=0; /* no debug by defect */
+	char       lineaDebug[500];
+
+	/* check entry parameters */
+	if(argv[1]==NULL)
+	{
+		sprintf(linea,"\nexec_proc_oracle [-n] invoice_from invoice_to\n\n");
+		fatal_error(linea);
+	}	
+	
+	/* commit mode by defect */
+	COMMIT_MODE = 1;
+
+	/* read entry parameters */
+	for (i=1;argv[i]!=NULL;i++)
+	{
+		if(strcmp(argv[i],"-n")==0)
+			COMMIT_MODE = 0;
+		else
+		{
+			if (invoice_from >= 0)
+				invoice_to = atol(argv[i]);
+			else
+				invoice_from = atol(argv[i]);
+		}
+	}
+
+	if(invoice_from < 0 || invoice_to < 0 || invoice_from > invoice_to)
+	{
+		sprintf(linea,"\nexec_proc_oracle [-n] invoice_from invoice_to\n\n");
+		fatal_error(linea);
+	}
+	
+	printf("\n--EXEC_PROC_ORACLE--\n\n");
+	
+	sprintf(lineaDebug,"process start\n");
+	PrintDebug(lineaDebug, 1); /* 1 is to force output line */	
+	
+	/* we create a new connection string */
+	strcpy(sOSid, getenv("ORACLE_SID"));
+	strcat(sConn,"/@");
+	strcat(sConn,sOSid);    
+
+	/* we register the sql_error() functions as the error handler*/
+	EXEC SQL WHENEVER SQLERROR DO sql_error("\nORACLE error--\n");
+    	
+    /* connect to the database*/    
+    EXEC SQL CONNECT :sConn;
+
+	/*date and time of the connection*/	
+	sprintf(lineaDebug,"Connected to ORACLE : %s\n", sConn);
+	PrintDebug(lineaDebug, 1);
+
+	if(COMMIT_MODE)
+	{
+		sprintf(lineaDebug, "running with COMMIT MODE ON.\n");
+		PrintDebug(lineaDebug, 1);
+	}
+
+	else
+	{
+		sprintf(lineaDebug, "running with COMMIT MODE OFF -- NO CHANGES TO THE DATABASE WILL BE DONE -- .\n");
+		PrintDebug(lineaDebug, 1);
+	}
+
+	sprintf(lineaDebug, "invoice from : %d\n",invoice_from);
+	PrintDebug(lineaDebug, 1);
+
+	sprintf(lineaDebug, "invoice to   : %d\n",invoice_to);
+	PrintDebug(lineaDebug, 1);
+
+	PrintDebug(lineaDebug, 1);	
+	sprintf(lineaDebug, "executing package pkg_nightly_processes.process_invoices : start \n");
+
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+	EXEC SQL EXECUTE
+	BEGIN
+	   pkg_nightly_processes.process_invoices(:invoice_from, :invoice_to, :RET, :MSG)
+	END;
+	END-EXEC;
+	
+	EXEC SQL WHENEVER SQLERROR DO sql_error("\nORACLE error--\n");
+
+	/* RET means return message, from the procedure if something goes wrong, we send the RET with a number to identify the problem, and */
+	/* MSG to send the specific error message from oracle */
+	if(atol(RET)!=0)
+	{
+		sprintf(linea,"execution of pkg_nightly_processes.process_invoices(%d,%d)\n%s\n",invoice_from , invoice_to, MSG);
+		fatal_error(linea);
+	}
+	
+	sprintf(lineaDebug, "pkg_nightly_processes.process_invoices() : End\n");
+	PrintDebug(lineaDebug, 1);	
+
+	/* Disconnect from ORACLE. */
+	if(COMMIT_MODE)
+	{
+		sprintf(lineaDebug, "COMMIT\n");
+		PrintDebug(lineaDebug, 1);
+		EXEC SQL COMMIT RELEASE;
+	}
+	else
+	{
+		sprintf(lineaDebug, "ROLLBACK\n");
+		PrintDebug(lineaDebug, 1);
+		EXEC SQL ROLLBACK RELEASE;
+	}
+
+	printf ("End of process\n");
+
+	exit(EXIT_SUCCESS);
+}
