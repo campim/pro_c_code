@@ -8,7 +8,9 @@ This repository contains the following examples :
 
 2. **generate_letters.pc :** example of a call to a package.procedure inside Oracle, creation of text files from it, and execution of host commands from a Pro\*C code
 
-This scripts are published here with the idea of being useful for anyone who wishes to create similar scripts. If this is the case and these scripts where somehow helpful to you, I greatly appreciate you send an email to me : 4966631+campim@users.noreply.github.com
+LICENSING
+
+This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 2 of the License, or (at your option) any later version. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 ### About the author
 Daniel G. Campos
