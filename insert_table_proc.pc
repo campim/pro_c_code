@@ -1,0 +1,326 @@
+/*
+insert_table_proc.pc example of insertion to a table from data read from a text file in oracle Pro*C
+UNIX demo
+Author (C) 2008 Daniel G. Campos
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+#include <sqlca.h>
+
+/* Tag Constants */
+#define  l_EntidadID				4
+#define  l_MedioPago				10
+#define  l_CantidadRegistros	6
+#define  l_Importe				13
+#define  l_MetodoPago			3
+
+/* Structs */
+struct stRegistro
+{
+	char MedioPago[l_MedioPago];
+	char EntidadID[l_EntidadID];
+	char CantidadRegistros[l_CantidadRegistros];
+	char Importe[l_Importe];
+	char MetodoPago[l_MetodoPago];
+};
+
+EXEC SQL BEGIN DECLARE SECTION;
+
+struct stRegistro RecRegistro;
+struct stRegistro auxReg;
+
+char		EntidadID_[l_EntidadID+1];
+char		MedioPago_[l_MedioPago+1];
+char		CantidadRegistros_[l_CantidadRegistros+1];
+char		Importe_[l_Importe+1];
+char		MetodoPago_[l_MetodoPago+1];
+char		FechaArchivo_[10+1];
+
+EXEC SQL END DECLARE SECTION;
+
+
+/********************************/
+/* global variables             */
+/********************************/
+long		Site=1;
+
+/********************************/
+/* sql error handling           */
+/********************************/
+void sql_error(msg)
+	char *msg;
+{
+	char err_msg[128];
+	size_t buf_len, msg_len;
+
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+		printf("\n%s\n", msg);
+		buf_len = sizeof (err_msg);
+		sqlglm(err_msg, &buf_len, &msg_len);
+		printf("%.*s\n", msg_len, err_msg);
+
+	EXEC SQL ROLLBACK RELEASE;
+	
+	exit(EXIT_FAILURE);
+}
+
+/*****************************************/
+/* fatal error handling                  */
+/*****************************************/
+
+void fatal_error(msg)
+	char *msg;
+{
+
+	long		ID;
+	struct	tm *datetime;
+	char		start_date[24];
+	time_t	idate;
+
+	printf("\n# FATAL ERROR #\n");
+	printf("%s\n",msg);
+
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (start_date,35,"%d-%m-%Y %H:%M",datetime);
+	printf ("end execution time: %s\n\n",start_date);
+
+	EXEC SQL ROLLBACK RELEASE;
+	exit(EXIT_FAILURE);
+}
+
+
+/********************************/
+/* Main                         */
+/********************************/
+
+void main(argc,argv)
+     int argc;
+     char *argv[];
+{
+	FILE		*NovFile;
+	FILE		*ErrorFile;
+	char		NombreArchivo[200]; 
+	char		NovName[200];
+	char		NovNameAux[200];
+	char		ErrorName[200];
+	char		linea[500];
+	char		aux2[50];
+	struct	tm *datetime;
+	char		start_date[24];
+	time_t	idate;
+	int		COMMIT_MODE=1;
+	int		i;
+	char		*PtrStr;
+	char		sConn[80];
+	char		sOSid[40];
+	char		*substring;
+	
+	/* check entry parameters */
+	if(argv[1]==NULL)
+	{
+		sprintf(linea,"\insert_table_proc <FILE> [-n] [-s<SITE>].\n\n");
+		fatal_error(linea);
+	}
+	else
+	{
+		if ((strcmp(argv[1], "-n")==0) || (strcmp(argv[1], "-s")==0))
+		{
+			sprintf(linea,"\ninsert_table_proc : first parameter must be <FILE> \n\n");
+			fatal_error(linea);
+		}
+				
+		strcpy(NovName,argv[1]);
+		strcpy(NovNameAux,argv[1]);
+		substring = strtok(NovNameAux, "/");
+		strcpy (NombreArchivo, substring);
+		
+		while (substring = strtok(NULL,"/") )
+		{
+			strcpy (NombreArchivo, substring);
+		}	
+	}
+
+	for (i=1;argv[i]!=NULL;i++)
+	{
+		if(strcmp(argv[i],"-n")==0)
+			COMMIT_MODE = 0;
+		if(strcmp(argv[i],"-s")==0)
+			Site=atoi(argv[i]+2);
+	}
+
+	printf ("\n---Insert table Pro*C---\n");
+	
+	printf("Start of process\n");	
+	printf("name of file sent by parameter : %s\n", NovName);
+	printf("name of file processed         : %s\n", NombreArchivo);
+		
+	/*ErrorName is the name of file with .Err extension */				
+	strcpy(ErrorName,argv[1]);
+	strcat(ErrorName,".Err");
+
+	/* crate the connection string */
+	strcpy(sOSid, getenv("ORACLE_SID"));
+	strcat(sConn,"/@");
+	strcat(sConn,sOSid);
+
+	/* Register sql_error() as the error handler. */
+	EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--\n");
+	EXEC SQL CONNECT :sConn;
+	
+	printf("Connected to ORACLE : %s\n", sConn);
+
+	/* open the text file for reading*/
+	NovFile=fopen(NovName,"r");
+	if(NovFile == NULL)
+	{
+		printf(linea,"\n%s NOT Found.\n\n",NovName);
+		fatal_error(linea);
+	}
+	
+	/* Open Error file to output all errors*/
+	ErrorFile=fopen(ErrorName,"w");
+	if(ErrorFile == NULL)
+	{
+		sprintf(linea,"\nError opening %s\n\n",ErrorName);
+		fatal_error(linea);
+	}
+	
+	if(COMMIT_MODE)
+	{
+		printf("running in COMMIT MODE.\n");
+	}
+	else
+	{
+		printf("running in NON-COMMIT MODE.\n");	
+	}
+	
+	printf("ORIGIN File name 			: %s\n",NovName);
+	printf("Error  File name         : %s\n",ErrorName);
+	printf("Site                     : %04d\n\n",Site);
+
+	/*read line by line from text file provided in parameter, process every line*/	
+	while(fgets(&RecRegistro,sizeof(RecRegistro),NovFile))
+	{
+		/* RecRegistro has already the structure of the text file we need to read */
+		strcpy(EntidadID_,"\0");
+		strcpy(MedioPago_,"\0");
+		strcpy(CantidadRegistros_,"\0");
+		strcpy(Importe_,"\0");
+		strcpy(MetodoPago_,"\0");
+		strcpy(FechaArchivo_,"\0");			
+		
+		strncat(EntidadID_,RecRegistro.EntidadID,l_EntidadID);
+		strncat(MedioPago_,RecRegistro.MedioPago,l_MedioPago);
+		strncat(CantidadRegistros_,RecRegistro.CantidadRegistros,l_CantidadRegistros);
+		strncat(Importe_,RecRegistro.Importe,l_Importe);
+		strncat(MetodoPago_,RecRegistro.MetodoPago,l_MetodoPago);
+
+		/*copy in variable FechaArchivo the date that comes with the name of the file */
+	
+		/*day*/
+		strcpy(aux2,"\0");
+		substr(NovName, 6, 2, aux2);
+		
+		strncat(FechaArchivo_,aux2,2);
+		strncat(FechaArchivo_, "/",1);
+		
+		/*month, first two digits after resX*/
+		strcpy(aux2, "\0");
+		substr(NovName,4,2, aux2);
+		
+		strncat(FechaArchivo_,aux2, 2);
+		strncat(FechaArchivo_, "/", 1);
+		
+		/*year, we get it from the environment*/
+		time(&idate);
+		datetime = localtime(&idate);
+		strftime (start_date,35,"%Y",datetime);
+		strncat(FechaArchivo_,start_date,5);
+		
+		strncat(EntidadID_,"\0",1);
+		strncat(MedioPago_,"\0",1);
+		strncat(CantidadRegistros_,"\0",1);
+		strncat(Importe_,"\0",1);
+		strncat(MetodoPago_,"\0",1);
+		strncat(FechaArchivo_,"\0",1);
+
+		printf("EntidadID: _%s_\n",EntidadID_);
+		printf("MedioPago: _%s_\n",MedioPago_);
+		printf("CantidadRegistros: _%s_\n",CantidadRegistros_);
+		printf("Importe: _%s_\n",Importe_);
+		printf("MetodoPago: _%s_\n",MetodoPago_);
+		printf("FechaArchivo: _%s_\n",FechaArchivo_);
+		printf("NovName: _%s_\n",NovName);
+		
+		
+		/*EntidadID_ has a special code, if R814, we change it with RAPA (this is an example of processing) */
+		if(strncmp(EntidadID_,"R814",2)==0)
+		{
+			strcpy(EntidadID_,"\0");
+			strcat(EntidadID_,"RAPA");
+			strncat(EntidadID_,"\0",1);
+		}	
+		
+		/* here we insert into the the table the data extracted from the text file */		
+		if (strlen(MedioPago_)>2)
+	        {
+	        	EXEC SQL INSERT INTO MY_SCHEMA.PI_RESUMEDATA_FROM_PROVIDER (
+	                Resumen_ID,
+	                Entidad_ID,
+	                Medio_Pago,
+	                Cantidad_Registros,
+	                Importe,
+	                Metodo_Pago,
+	                Fecha_Archivo
+			, Nombre_Archivo)
+	                VALUES (
+	                MY_SCHEMA.PI_RESUMEDATA_FROM_PROVIDER.NEXTVAL,
+	                :EntidadID_,
+	                :MedioPago_,
+	                :CantidadRegistros_,
+	                :Importe_,
+	                :MetodoPago_,
+	                to_date(:FechaArchivo_,'dd/mm/yyyy')
+			, :NombreArchivo);
+	        }
+	}
+
+	if(COMMIT_MODE==0)
+	{
+		EXEC SQL ROLLBACK RELEASE;
+	}
+	else
+	{
+		EXEC SQL COMMIT RELEASE;
+	}
+		
+	fclose(NovFile);
+	fclose(ErrorFile);	
+	
+	/* Desconectarse de ORACLE */
+	printf ("End Process\n");
+	
+	exit(EXIT_SUCCESS);
+}
+
+	
+
+
+
+
