@@ -4,9 +4,11 @@ Author Daniel G. Campos 2008
 
 This repository contains the following examples :
 
-1. **exec_proc_oracle.pc :** example of a call to a package.procedure inside Oracle from a Pro\*C code
+1. **exec_proc_oracle.pc :** example of a call to a package.procedure inside Oracle from a Pro\*C code.
 
-2. **generate_letters.pc :** example of a call to a package.procedure inside Oracle, creation of text files from it, and execution of host commands from a Pro\*C code
+2. **generate_letters.pc :** example of a call to a package.procedure inside Oracle, creation of text files from it, and execution of host commands from a Pro\*C code.
+
+3. **insert_table_proc.pc :**example of an insert into a table with data read from a simple text file with Pro\*C code. In this example we use a typical C STRUCT structure to hold the data read from the text file.
 
 LICENSING
 
