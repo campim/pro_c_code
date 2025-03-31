@@ -10,6 +10,8 @@ This repository contains the following examples :
 
 3. **insert_table_proc.pc :** example of an insert into a table with data read from a simple text file with Pro\*C code. In this example we use a typical C STRUCT structure to hold the data read from the text file.
 
+4. **pack_par_proc.pc :** example of execution of a package procedure in oracle Pro\*C, returning data to Pro\*C for processing, also executing system commands.
+
 LICENSING
 
 This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 2 of the License, or (at your option) any later version. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
