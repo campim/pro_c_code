@@ -10,7 +10,7 @@ This repository contains the following examples :
 
 3. **insert_table_proc.pc :** example of an insert into a table with data read from a simple text file with Pro\*C code. In this example we use a typical C STRUCT structure to hold the data read from the text file.
 
-4. **pack_par_proc.pc :** example of execution of a package procedure in oracle Pro\*C, returning data to Pro\*C for processing, also executing system commands.
+4. **pack_par_proc.pc :** example of execution of a package procedure in oracle Pro\*C, returning data to Pro\*C for processing, also executing host commands.
 
 LICENSING
 
