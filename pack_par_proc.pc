@@ -1,0 +1,341 @@
+/*
+pack_par_proc.pc example of execution of a package procedure in oracle Pro*C, returning data to Pro*C for processing, also executing system commands
+UNIX demo
+Author (C) 2008 Daniel G. Campos
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+*/
+
+/*  
+    the connection string determines the user we are making the connection with, 
+    and so this user MUST have execution permissions granted from a DBA in order 
+    to execute the package, Typically this Pro*C code is run by a shell script 
+    process that is automatically called with a crontab, and the connection strings
+    resides in another script with another permissions  
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+
+/* Include the SQL Communications Area. You can use #include or EXEC SQL INCLUDE. */
+#include <sqlca.h>
+
+/* Define constants for VARCHAR lengths. */
+#define		UNAME_LEN		20
+#define		PWD_LEN			40
+#define		NOT_FOUND		1403
+#define		PATH_LEN			40
+#define		TAB				9
+#define		PAYMENTS_DIR	"/data_files/automatic_payment_output/new"
+#define		ARCHIVE_DIR		"/data_files/automatic_payment_output/archive"
+#define		UTL_DIR			"/datafiles/utl_dir"
+
+
+/* Structs */
+EXEC SQL BEGIN DECLARE SECTION;
+
+char	PathUtl[PATH_LEN];
+char	RET[100];
+char	MSG[500];
+char 	Date[9];
+long	COMMIT_MODE = 1;
+long	BATCH;
+long	Trans;
+
+EXEC SQL END DECLARE SECTION;
+
+
+/* global Variables */
+char   	Cmd[2500];
+
+/* Declare SQL error handling function. */
+void sql_error(msg)
+	char *msg;
+{
+	char err_msg[128];
+	size_t buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+	
+		printf("\n%s\n", msg);
+		buf_len = sizeof (err_msg);
+		sqlglm(err_msg, &buf_len, &msg_len);
+		printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	
+	exit(EXIT_FAILURE);
+}
+
+/* fatal error routine */
+void fatal_error(msg)
+	char *msg;
+{
+	struct tm *datetime;
+	char   start_date[24];
+	time_t idate;
+
+	printf("\n# FATAL ERROR #\n");
+	printf("%s\n",msg);
+
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (start_date,35,"%d-%m-%Y %H:%M:%S",datetime);
+	printf ("End process time : %s\n\n",start_date);
+
+	EXEC SQL ROLLBACK RELEASE;
+	
+	exit(EXIT_FAILURE);
+}
+
+
+/* Setup */
+void Setup()
+{
+	char   linea[2500];
+	
+	printf("Setup...\n");
+	    
+	EXEC SQL SELECT NVL(MIN(PAYMENTS.AR_REF),0) MIN
+	INTO :Trans
+	FROM TABLE_TEST_HEAD AH
+	WHERE AH.TRANSFERRED = 'N';
+	
+	if(Trans>0)
+	{
+		sprintf(linea,"There are invoices pending for transfer to accounting : %d\n",Trans);
+		fatal_error(linea);
+	}
+
+	/* delete existing files from temp folder*/
+	printf("Deleting current files from temp folder %s ...\n", PathUtl);
+	
+	/* call system command rm for deleting files */ 
+	sprintf(Cmd,"rm -f %s/DE*.*\0",PathUtl);
+	system(Cmd);
+		
+	printf("Setup finished.\n");
+	
+	return;
+}
+
+void main(argc,argv)
+	int argc;
+	char *argv[];
+{
+	long   ret;
+	char   linea[2500];
+	char   aux[2500];
+	char   Path[2500] = "";
+	char   PathArch[2500] = "";
+	struct tm *datetime;
+	char   start_date[24];
+	char   log_date[24];
+	time_t idate;
+	int    i;
+	char   *PtrStr;
+	char   sConn[80];
+	char   sOSid[40];
+
+	/*we use environment variable TIMS_HOME to create alternative folders for entry parameters */
+	PtrStr = getenv("TIMS_HOME");
+	strcpy(aux,PtrStr);
+
+	/* check entry parameters */
+	if(argv[1]==NULL)
+	{
+		/*if there are no arguments, we assume commit_mode = 1 */
+		COMMIT_MODE = 1;
+	}
+	
+	for (i=1;argv[i]!=NULL;i++)
+	{
+		if(strcmp(argv[i],"-n")==0)
+			COMMIT_MODE = 0;
+		if(strcmp(argv[i],"-h")==0)
+		{
+			printf("\nPACK_PAR_PROC [-n] No Commit [-pd] Payments Dir [-ad] Archive Dir [-ud] Utl Dir [-h] help.\n\n");
+			exit(EXIT_SUCCESS);		
+		}
+		if(strcmp(argv[i],"-pd")==0)
+		{
+			sprintf(Path, "%s%s\0", aux, argv[i+1]);			
+			printf("Payments dir folder : %s\n", Path);
+			
+		}
+		if(strcmp(argv[i],"-ad")==0)
+		{
+			sprintf(PathArch, "%s%s\0",aux, argv[i+1]);
+			printf("Archive Dir folder  : %s\n", PathArch);
+		}
+		if(strcmp(argv[i],"-ud")==0)
+		{
+			sprintf(PathUtl, "%s\0", argv[i+1]);
+			printf("Utl Dir folder  : %s\n", PathUtl);
+		}	
+	}
+
+	printf ("\n--PACK_PAR_PROC--\n");	
+	
+	printf("Start process\n");		
+	
+	/* ORACLE connection string */
+	strcpy(sOSid, getenv("ORACLE_SID"));
+	strcat(sConn,"/@");
+	strcat(sConn,sOSid);    
+
+	/* Register sql_error() as the error handler. */
+	EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--\n");
+	EXEC SQL CONNECT :sConn;
+
+	/*date and time of process */	
+	printf("Connected to ORACLE : %s\n", sConn);
+
+	time(&idate);
+	datetime = localtime(&idate);
+	strftime (log_date,35,"%Y%m%d%H%M%S",datetime);
+
+	if(COMMIT_MODE)
+	{
+		printf("Running in COMMIT MODE.\n");
+	}
+	else
+	{
+		printf("Running in NON-COMMIT MODE.\n");
+	}
+
+
+	/*check file paths */	
+	if (strcmp(Path, "")==0)
+	{
+	    	sprintf(Path,"%s%s\0",aux,PAYMENTS_DIR);
+	    	printf("Path no set, we use default :%s\n", Path);
+	}
+
+	if (strcmp(PathArch, "")==0)
+	{
+		sprintf(PathArch,"%s%s\0",aux,ARCHIVE_DIR);	
+		printf("File Path not set, we use default :%s\n", PathArch);
+	}
+  	if (strcmp(PathUtl, "")==0)
+ 	{
+		sprintf(PathUtl, "%s\0", UTL_DIR);
+		printf("Utl Path not set, we use default : %s\n", PathUtl);
+   }
+	
+	/* Setup */
+	Setup();
+
+	/* we call payments.pack_par_proc procedure, return values of execution in :RET and :MSG variables */
+	printf("PAYMENTS.PACK_PAR_PROC(ret,msg);\n");
+
+    	EXEC SQL WHENEVER SQLERROR CONTINUE;
+    	EXEC SQL EXECUTE
+    	BEGIN
+       	PAYMENTS.PACK_PAR_PROC(:RET,:MSG);
+    	END;
+    	END-EXEC;
+		
+	if(atol(RET)!=0)
+	{
+		sprintf(linea,"PAYMENTS.PACK_PAR_PROC(ret,msg);\n%s\n",MSG);
+		fatal_error(linea);
+	}
+
+	printf("PAYMENTS.EXPORT_PACK_PAR_PROC(%s,BATCH,ret,msg);)\n",PathUtl);
+	
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+	
+		EXEC SQL EXECUTE
+			BEGIN
+				PAYMENTS.EXPORT_PACK_PAR_PROC(:PathUtl,:BATCH,:RET,:MSG);
+			END;
+		END-EXEC;
+		
+	EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--\n");
+	
+
+	if(atol(RET)!=0)
+	{
+		sprintf(linea,"PAYMENTS.EXPORT_PACK_PAR_PROC(%s,BATCH,ret,msg);\n%s\n",PathUtl,MSG);
+		fatal_error(linea);
+	}
+	
+	/* move generated files */
+	if(BATCH > 0)
+	{
+		/* Disconnect from ORACLE. */
+		if(COMMIT_MODE)
+			EXEC SQL COMMIT RELEASE;
+		else
+			EXEC SQL ROLLBACK RELEASE;
+	
+		sprintf(Cmd,"mkdir %s/%s\0",PathArch,log_date);
+		ret = system(Cmd);
+		if(ret != 0)
+		{
+			printf("Error while trying to execute : %s\n",Cmd);					
+		}
+
+		printf("executing command : cp -f %s/DE*.* %s/%s\n", PathUtl, PathArch, log_date);
+		sprintf(Cmd,"cp -f %s/DE*.* %s/%s\0",PathUtl,PathArch,log_date);
+		ret = system(Cmd);
+		if(ret != 0)
+		{
+			printf("Error while trying to execute : %s\n",Cmd);					
+		}
+
+		printf("executing command : mv -f %s/DE*.* %s\n", PathUtl, Path);
+		sprintf(Cmd,"mv -f %s/DE*.* %s\0",PathUtl,Path);
+		ret = system(Cmd);
+		if(ret != 0)
+		{
+			printf("Error while trying to execute : %s\n",Cmd);
+		}
+
+		printf("executing command : cp -f %s/DE*.102 %s/%s\n", PathUtl, PathArch, log_date);
+		sprintf(Cmd,"cp -f %s/DE*.102 %s/%s\0",PathUtl,PathArch,log_date);
+		ret = system(Cmd);
+		if(ret != 0)
+		{
+			printf("Error while trying to execute : %s\n",Cmd);
+		}
+
+		printf("executing command : mv -f %s/DE*.102 %s\n", PathUtl, Path);
+		sprintf(Cmd,"mv -f %s/DE*.102 %s\0",PathUtl,Path);
+		ret = system(Cmd);
+		if(ret != 0)
+		{
+			printf("Error while trying to execute : %s\n",Cmd);
+		}
+	}
+	
+	printf("It has been generated %d Batches.\n\n",BATCH);
+
+	printf ("Fin Proceso\n");	
+		
+	exit(EXIT_SUCCESS);
+}
+
+	
+		
+		
+		
+
+
+
+
+
+
